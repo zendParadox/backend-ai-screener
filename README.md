@@ -40,10 +40,9 @@ Sebelum memulai, pastikan Anda telah menginstal perangkat lunak berikut:
    ```
 3. Konfigurasi Environment Variables
    Buat file `.env ` di direktori utama proyek dan tambahkan kunci API Google Gemini Anda.
-   `bash
-   # .env
-   GEMINI_API_KEY=AIzaSy...[KUNCI_API_GEMINI_ANDA]
-   `
+   ```bash
+   GEMINI_API_KEY=[KUNCI_API_GEMINI_ANDA]
+   ```
 
 ## Menjalankan Aplikasi
 
