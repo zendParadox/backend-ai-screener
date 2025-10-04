@@ -1,16 +1,17 @@
 const { QdrantClient } = require("@qdrant/js-client-rest");
 const { v4: uuidv4 } = require("uuid");
 
-// --- Helper function for delay ---
+// --- Utility function to delay execution (for Qdrant initialization wait) ---
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Data reference (Ground Truth)
+// --- Ground truth reference documents used for candidate evaluation ---
 const JOB_DESCRIPTION = `
 Position: Backend Developer. 
 Required Skills: Node.js, Express, Python, Django, SQL (PostgreSQL), NoSQL (MongoDB, Redis), Docker, CI/CD. 
 Experience: 3-5 years in backend development. 
 Responsibilities: Design and implement scalable APIs, manage databases, write clean and testable code, collaborate with frontend teams.
 `;
+
 const CASE_STUDY_BRIEF = `
 Task: Build a backend service for a simple URL shortener. 
 Requirements:
@@ -19,41 +20,48 @@ Requirements:
 3. Must handle high traffic and potential invalid inputs gracefully.
 4. The solution should be containerized using Docker.
 `;
+
 const CV_RUBRIC = `
 CV Evaluation Rubric:
-- Technical Skills Match (40%): Compare candidate's skills with required skills (Node.js, Python, SQL, etc.).
-- Experience Level (25%): Check if years of experience match the 3-5 year requirement.
-- Relevant Achievements (20%): Look for quantifiable achievements like "improved API response time by 30%".
-- Cultural Fit (15%): Assess clarity and professionalism in descriptions.
+- Technical Skills Match (40%).
+- Experience Level (25%).
+- Relevant Achievements (20%).
+- Cultural Fit (15%).
 `;
+
 const PROJECT_RUBRIC = `
 Project Report Evaluation Rubric:
-- Correctness (30%): Does the solution meet all functional requirements of the URL shortener brief?
-- Code Quality (25%): Is the code clean, modular, and well-structured?
-- Resilience (20%): How does the system handle errors, edge cases, and high loads?
-- Documentation (15%): Is the setup and API usage clearly documented?
-- Creativity (10%): Are there any innovative solutions or extra features?
+- Correctness (30%).
+- Code Quality (25%).
+- Resilience (20%).
+- Documentation (15%).
+- Creativity (10%).
 `;
 
-const VECTOR_SIZE = 384;
-const DUMMY_VECTOR = Array(VECTOR_SIZE).fill(0.1);
+// --- Vector config for Qdrant ---
+const VECTOR_SIZE = 384; // Size of embeddings expected
+const DUMMY_VECTOR = Array(VECTOR_SIZE).fill(0.1); // Dummy vector placeholder
 
+// --- Ingestion pipeline ---
 async function ingestData() {
   console.log("Starting ingestion process for Qdrant...");
 
   const client = new QdrantClient({ url: "http://localhost:6333" });
 
+  // Allow Qdrant server to warm up
   console.log("Waiting for Qdrant to initialize (2 seconds)...");
   await delay(2000);
 
   const collectionName = "candidate_screening_references";
   console.log(`Checking for collection: ${collectionName}`);
 
+  // Check if collection already exists
   const collections = await client.getCollections();
   const collectionExists = collections.collections.some(
     (c) => c.name === collectionName
   );
 
+  // Drop existing collection to avoid duplicates
   if (collectionExists) {
     console.log(
       `Collection "${collectionName}" already exists. Deleting it for a clean ingest.`
@@ -61,15 +69,17 @@ async function ingestData() {
     await client.deleteCollection(collectionName);
   }
 
+  // Create a new collection
   console.log(`Creating new collection: "${collectionName}"`);
   await client.createCollection(collectionName, {
     vectors: {
       size: VECTOR_SIZE,
-      distance: "Cosine",
+      distance: "Cosine", // Cosine similarity for vector search
     },
   });
   console.log("Collection created successfully.");
 
+  // Define reference points/documents to insert
   const points = [
     {
       id: uuidv4(),
@@ -109,6 +119,7 @@ async function ingestData() {
     },
   ];
 
+  // Insert documents into Qdrant
   console.log("Upserting 4 documents into the collection...");
   await client.upsert(collectionName, {
     wait: true,
@@ -117,10 +128,12 @@ async function ingestData() {
 
   console.log("✅ Ingestion complete!");
 
+  // Verify ingestion
   const collectionInfo = await client.getCollection(collectionName);
   console.log(
     `Verification: Collection now contains ${collectionInfo.points_count} documents.`
   );
 }
 
+// Run ingestion process
 ingestData().catch(console.error);

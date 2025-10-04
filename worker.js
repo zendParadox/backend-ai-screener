@@ -7,6 +7,7 @@ const path = require("path");
 const PDFParser = require("pdf2json");
 require("dotenv").config();
 
+// --- Redis & BullMQ Setup ---
 const QUEUE_NAME = "evaluation-queue";
 const connection = new IORedis({
   host: process.env.REDIS_HOST || "localhost",
@@ -14,12 +15,17 @@ const connection = new IORedis({
   maxRetriesPerRequest: null,
 });
 const evaluationQueue = new Queue(QUEUE_NAME, { connection });
-const jobResults = {};
+const jobResults = {}; // Store job states in memory
+
+// --- Qdrant client ---
 const qdrantClient = new QdrantClient({ url: "http://localhost:6333" });
 const collectionName = "candidate_screening_references";
+
+// --- Gemini AI Model ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
+// --- Parse PDF files into plain text ---
 async function parsePdf(filePath) {
   return new Promise((resolve, reject) => {
     const pdfParser = new PDFParser(this, 1);
@@ -44,6 +50,7 @@ async function parsePdf(filePath) {
   });
 }
 
+// --- Generate embeddings from text ---
 async function getEmbedding(text) {
   const { pipeline } = await import("@xenova/transformers");
   const embedder = await pipeline(
@@ -54,6 +61,7 @@ async function getEmbedding(text) {
   return Array.from(result.data);
 }
 
+// --- Setup Worker to process jobs ---
 const setupWorker = () => {
   const worker = new Worker(
     QUEUE_NAME,
@@ -63,18 +71,20 @@ const setupWorker = () => {
       jobResults[id] = { status: "processing", data };
 
       try {
+        // Step 1: Parse candidate files
         console.log("[Worker] Parsing CV and Report PDF files...");
         const cvPath = path.join(__dirname, "uploads", data.cv_id);
         const reportPath = path.join(__dirname, "uploads", data.report_id);
-
         const cvText = await parsePdf(cvPath);
         const reportText = await parsePdf(reportPath);
         console.log("[Worker] PDFs parsed successfully.");
 
+        // Step 2: Generate embedding from CV text
         console.log("[Worker] Creating embedding for CV content...");
         const queryVector = await getEmbedding(cvText.substring(0, 500));
         console.log("[Worker] Embedding created.");
 
+        // Step 3: Retrieve relevant context from Qdrant (RAG)
         console.log(
           "[Worker] Retrieving relevant context from Qdrant (RAG)..."
         );
@@ -83,61 +93,55 @@ const setupWorker = () => {
           limit: 4,
           with_payload: true,
         });
+
         const context = searchResult
           .map(
             (res) =>
               `--- DOCUMENT: ${res.payload.type} ---\n${res.payload.content}`
           )
           .join("\n\n");
+
         console.log(
           `[Worker] Retrieved ${searchResult.length} documents from Qdrant.`
         );
 
+        // Step 4: Construct evaluation prompt
         const prompt = `
-                You are an expert AI HR assistant for a backend developer position. Your task is to evaluate a candidate based on their CV and a project report.
-                You must use the provided context documents (Job Description, Case Study Brief, and Scoring Rubrics) as the absolute ground truth for your evaluation.
-                Your output must be a valid JSON object with no extra text or explanations.
+You are an expert AI HR assistant for a backend developer position.
+Your task is to evaluate a candidate based on their CV and project report.
+Use the provided documents as the absolute ground truth.
 
-                The required JSON structure is:
-                {
-                  "cv_match_rate": float (0.0 to 1.0),
-                  "cv_feedback": "string",
-                  "project_score": float (1.0 to 5.0),
-                  "project_feedback": "string",
-                  "overall_summary": "A 3-5 sentence summary of the candidate's strengths, weaknesses, and a final recommendation."
-                }
+Return ONLY a valid JSON:
+{
+  "cv_match_rate": float (0.0 to 1.0),
+  "cv_feedback": "string",
+  "project_score": float (1.0 to 5.0),
+  "project_feedback": "string",
+  "overall_summary": "3-5 sentence summary"
+}
 
-                Here are the documents for your evaluation:
+--- CONTEXT DOCUMENTS ---
+${context}
+--- CANDIDATE CV ---
+${cvText}
+--- CANDIDATE PROJECT REPORT ---
+${reportText}
+        `;
 
-                --- CONTEXT DOCUMENTS ---
-                ${context}
-                --- END OF CONTEXT DOCUMENTS ---
-
-                Now, evaluate the following candidate materials:
-
-                --- CANDIDATE CV ---
-                ${cvText}
-                --- END OF CANDIDATE CV ---
-
-                --- CANDIDATE PROJECT REPORT ---
-                ${reportText}
-                --- END OF CANDIDATE PROJECT REPORT ---
-
-                Produce the JSON output now.
-            `;
-
+        // Step 5: Call Gemini AI for evaluation
         console.log("[Worker] Calling Gemini API for evaluation...");
         const result = await geminiModel.generateContent(prompt);
         const responseText = result.response.text();
 
+        // Step 6: Clean + Parse response JSON
         const cleanedJsonString = responseText
           .replace(/```json/g, "")
           .replace(/```/g, "")
           .trim();
         const evaluationResult = JSON.parse(cleanedJsonString);
 
+        // Step 7: Save results
         console.log("[Worker] Received evaluation from Gemini.");
-
         jobResults[id] = { status: "completed", result: evaluationResult };
         console.log(`[Worker] Job ${id} completed successfully.`);
       } catch (error) {
@@ -148,11 +152,12 @@ const setupWorker = () => {
     { connection }
   );
 
+  // --- Worker event logging ---
   worker.on("completed", (job) =>
     console.log(`[Worker] Job ${job.id} has completed.`)
   );
   worker.on("failed", (job, err) =>
-    console.log(`[Worker] Job ${job.id} has failed with ${err.message}`)
+    console.log(`[Worker] Job ${job.id} failed with error: ${err.message}`)
   );
 
   console.log(

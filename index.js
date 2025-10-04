@@ -7,14 +7,17 @@ const { evaluationQueue, jobResults } = require("./worker");
 const app = express();
 const port = 3000;
 
-app.use(express.json());
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+// Middleware
+app.use(express.json()); // Parse JSON requests
+app.use("/uploads", express.static(path.join(__dirname, "uploads"))); // Serve uploaded files
 
+// --- Configure multer storage for file uploads ---
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, "uploads/");
+    cb(null, "uploads/"); // Save in uploads folder
   },
   filename: function (req, file, cb) {
+    // Generate unique filename to avoid collisions
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
     cb(
       null,
@@ -24,6 +27,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
+// --- Upload endpoint (accepts CV + Report) ---
 app.post(
   "/upload",
   upload.fields([
@@ -36,6 +40,8 @@ app.post(
         .status(400)
         .json({ error: "Both cv and report files are required" });
     }
+
+    // Return stored file IDs
     res.json({
       message: "Files uploaded successfully",
       cv_id: req.files.cv[0].filename,
@@ -44,21 +50,28 @@ app.post(
   }
 );
 
+// --- Submit evaluation job ---
 app.post("/evaluate", async (req, res) => {
   const { job_title, cv_id, report_id } = req.body;
+
+  // Validate required params
   if (!job_title || !cv_id || !report_id) {
     return res
       .status(400)
       .json({ error: "job_title, cv_id, and report_id are required" });
   }
 
+  // Generate unique job ID
   const jobId = uuidv4();
+
+  // Push job to BullMQ queue
   await evaluationQueue.add(
     job_title,
     { job_title, cv_id, report_id },
     { jobId }
   );
 
+  // Store job metadata
   jobResults[jobId] = {
     id: jobId,
     status: "queued",
@@ -66,9 +79,11 @@ app.post("/evaluate", async (req, res) => {
     createdAt: new Date().toISOString(),
   };
 
+  // Respond to client
   res.status(202).json({ job_id: jobId, status: "queued" });
 });
 
+// --- Fetch evaluation result ---
 app.get("/result/:id", (req, res) => {
   const { id } = req.params;
   const jobInfo = jobResults[id];
@@ -80,6 +95,7 @@ app.get("/result/:id", (req, res) => {
   res.json(jobInfo);
 });
 
+// --- Start Express server ---
 app.listen(port, () => {
   console.log(`[Server] Express server is running at http://localhost:${port}`);
 });
