@@ -1,4 +1,4 @@
-# Backend Service: AI-Powered Candidate Screenin
+# Backend Service: AI-Powered Candidate Screening
 
 Proyek ini adalah sebuah backend service yang dirancang untuk mengotomatisasi proses screening awal lamaran kerja. Service ini menerima CV dan laporan proyek dari kandidat, lalu menggunakan alur kerja berbasis AI (RAG dan LLM) untuk mengevaluasinya berdasarkan dokumen referensi internal (Deskripsi Pekerjaan dan Case Study Brief), dan menghasilkan laporan evaluasi terstruktur dalam format JSON.
 
@@ -41,9 +41,9 @@ Sebelum memulai, pastikan Anda telah menginstal perangkat lunak berikut:
 3. Konfigurasi Environment Variables
    Buat file `.env ` di direktori utama proyek dan tambahkan kunci API Google Gemini Anda.
    `bash
-    # .env
-    GEMINI_API_KEY=AIzaSy...[KUNCI_API_GEMINI_ANDA]
-    `
+   # .env
+   GEMINI_API_KEY=AIzaSy...[KUNCI_API_GEMINI_ANDA]
+   `
 
 ## Menjalankan Aplikasi
 
